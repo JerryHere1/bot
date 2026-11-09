@@ -1,0 +1,58 @@
+# ───────────────────────────── Discord ─────────────────────────────
+discord:
+  # Bot token from https://discord.com/developers/applications  (Bot tab -> Reset Token)
+  # No privileged intents are needed.
+  token: "PUT_YOUR_BOT_TOKEN_HERE"
+  # Shown as "Listening to ..." on the bot's profile.
+  activity: "/play"
+  # Optional: your server (guild) ID. Slash commands then appear instantly.
+  # Leave empty to register them globally (can take a while to show up).
+  guild-id: ""
+
+# ───────────────────────────── Player ──────────────────────────────
+player:
+  default-volume: 50        # 0-100 is normal; the panel's volume buttons use volume-step
+  max-volume: 150           # above 100 may distort
+  volume-step: 10
+  max-queue-size: 200
+  max-playlist-tracks: 100  # tracks taken from a playlist / album link
+  idle-leave-seconds: 180   # leave voice this long after the queue ends (0 = never)
+  empty-leave-seconds: 30   # leave voice this long after everyone left (0 = never)
+  panel-refresh-seconds: 15 # how often the progress bar updates (0 = only on changes)
+
+# ───────────────────────────── YouTube ─────────────────────────────
+youtube:
+  # "youtube-source" -> built-in, no extra software (YouTube breaks this from time to time)
+  # "yt-dlp"         -> uses a yt-dlp binary installed on the host (updates faster than youtube-source)
+  backend: "youtube-source"
+
+  # Only for backend = yt-dlp: command or full path of the executable.
+  yt-dlp-path: "yt-dlp"
+
+  # Only for backend = youtube-source. Tried in this order. Names are class names from
+  # dev.lavalink.youtube.clients. Add "Tv" if you use OAuth below.
+  clients: [Music, AndroidVr, Ios, Android, Web, TvHtml5Simply]
+
+  # Remote cipher server (https://github.com/kikkia/yt-cipher). YouTube hides the real stream URLs behind
+  # a scrambled script; this free public server unscrambles it so playback keeps working after YouTube changes.
+  # Leave url empty to do it locally instead (works only until YouTube changes its player again).
+  remote-cipher:
+    url: "https://cipher.kikkia.dev/"
+    password: ""
+    user-agent: "DiscordMusicPanel"
+
+  # Optional OAuth login to look less like a bot. USE A THROWAWAY GOOGLE ACCOUNT - it can get banned.
+  # With enabled=true and no refresh-token, the console prints a code to enter at google.com/device;
+  # afterwards the console prints a refresh token you can paste below.
+  oauth:
+    enabled: false
+    refresh-token: ""
+
+# ───────────────────────────── Spotify ─────────────────────────────
+# Spotify links are resolved with Spotify's API (title/artist/cover) and the audio is
+# found on YouTube. Create a free app at https://developer.spotify.com/dashboard
+spotify:
+  enabled: false
+  client-id: ""
+  client-secret: ""
+  country-code: "US"

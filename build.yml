@@ -1,0 +1,115 @@
+name: Build plugin
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  # The exact youtube-source commit the plugin is built against (must match youtube.source.version in pom.xml).
+  YT_COMMIT: 2be8e542d3f6f178e048dca565892684c2e40177
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the project
+        uses: actions/checkout@v5
+
+      # ── 1. YouTube support: build youtube-source from the pinned commit ──────────────────────────
+      # YouTube changed its formats and the last tagged release no longer plays many videos, so
+      # we compile a newer commit ourselves. If this step fails, Maven falls back to the snapshot
+      # repository (maven.lavalink.dev), which usually has the same commit.
+      - name: Set up Java 17 (for building YouTube support)
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build youtube-source
+        id: ytsource
+        continue-on-error: true
+        env:
+          CI: 'true'
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/lavalink-devs/youtube-source.git "$RUNNER_TEMP/youtube-source"
+          cd "$RUNNER_TEMP/youtube-source"
+          git checkout --quiet "$YT_COMMIT"
+          chmod +x gradlew
+          ./gradlew --no-daemon --console=plain -q :common:publishToMavenLocal :v2:publishToMavenLocal
+          # Find out which version name Gradle published, so Maven uses exactly that one.
+          VERSION=""
+          for d in "$HOME"/.m2/repository/dev/lavalink/youtube/v2/*/; do
+            VERSION="$(basename "$d")"
+            break
+          done
+          test -n "$VERSION"
+          echo "Built youtube-source $VERSION"
+          echo "YT_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      # ── 2. DAVE (Discord's voice encryption): use the newest release that is really published ────
+      - name: Choose DAVE library version
+        run: |
+          set -u
+          BASE=https://repo1.maven.org/maven2/moe/kyokobot/libdave
+          have() { curl -fsIL -o /dev/null "$BASE/$1/$2/$1-$2.pom"; }
+          for v in 0.2.0 0.1.4; do
+            ok=1
+            for a in api adapter-jda impl-jni natives-linux-x86-64 natives-linux-aarch64 natives-win-x86-64; do
+              if ! have "$a" "$v"; then echo "libdave $v is not fully published ($a is missing)"; ok=0; break; fi
+            done
+            if [ "$ok" = 1 ]; then
+              echo "Using libdave $v"
+              echo "LIBDAVE_ARGS=-Dlibdave.version=$v -Dlibdave.natives.version=$v" >> "$GITHUB_ENV"
+              exit 0
+            fi
+          done
+          echo "No newer libdave found - using the versions from pom.xml"
+
+      # ── 3. Build the plugin ───────────────────────────────────────────────────────────────────────
+      - name: Set up Java 21
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build the jar
+        run: |
+          set -u
+          YT_ARGS=""
+          if [ -n "${YT_VERSION:-}" ]; then YT_ARGS="-Dyoutube.source.version=$YT_VERSION"; fi
+          # shellcheck disable=SC2086
+          if ! mvn -B -ntp clean package $YT_ARGS ${LIBDAVE_ARGS:-}; then
+            if [ -n "${LIBDAVE_ARGS:-}" ]; then
+              echo "::warning::Build with the newer DAVE library failed - retrying with the versions from pom.xml"
+              # shellcheck disable=SC2086
+              mvn -B -ntp clean package $YT_ARGS
+            else
+              exit 1
+            fi
+          fi
+
+      - name: Check the jar contents
+        run: |
+          set -u
+          JAR=target/DiscordMusicPanel-1.0.0.jar
+          ls -l "$JAR"
+          LIST="$(unzip -l "$JAR")"
+          for f in plugin.yml config.yml dev/musicpanel/MusicPanelPlugin.class \
+                   dev/lavalink/youtube/YoutubeAudioSourceManager.class \
+                   net/dv8tion/jda/api/JDA.class \
+                   com/sedmelluq/discord/lavaplayer/player/DefaultAudioPlayerManager.class \
+                   moe/kyokobot/libdave/jda/LDJDADaveSessionFactory.class; do
+            if echo "$LIST" | grep -q " $f\$"; then echo "OK      $f"; else echo "MISSING $f"; exit 1; fi
+          done
+          echo "Native libraries inside the jar:"
+          echo "$LIST" | grep -E '\.(so|dll|dylib)$' | grep -i dave || echo "::warning::No DAVE native library found inside the jar - voice may not work"
+
+      - name: Upload the jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiscordMusicPanel-jar
+          path: target/DiscordMusicPanel-1.0.0.jar
+          if-no-files-found: error
